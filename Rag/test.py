@@ -87,7 +87,7 @@ def rag(query, k=2):
 # ---------------------- STEP 7: Test the System ----------------------
 
 # Define a question to test your RAG system
-query = "What is RAG in NLP?"
+query = "What is rag in NLP?"
 
 # Call the RAG function with the query
 answer = rag(query)

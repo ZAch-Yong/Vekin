@@ -28,7 +28,7 @@ def extract_text_from_url(url):
         headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(url, headers=headers, timeout=5)
         soup = BeautifulSoup(response.text, "html.parser")
-        paragraphs = soup.find_all("p")
+        paragraphs = soup.find_all("div")
         text = " ".join([p.get_text() for p in paragraphs])
         return text[:4000]  # Limit to prevent overly long input
     except Exception as e:
@@ -51,28 +51,35 @@ def llm_checker(output, question, reference):
     return result.strip()
 
 # --- Main RAG function with checkers ---
-def web_rag_with_checkers(query, expected_keywords=None, reference_answer=None):
+def web_rag_with_dynamic_retries(query, expected_keywords, max_retries=3):
     try:
+        # Step 1: Search and build context
         urls = google_search(query, API_KEY, CSE_ID)
         context_parts = [extract_text_from_url(url) for url in urls]
         context = " ".join(context_parts)
-        prompt = f"Context: {context} Question: {query}"
-        result = generator(prompt, max_new_tokens=100)[0]['generated_text']
 
-        # Run keyword check
-        keyword_check = None
-        if expected_keywords:
-            keyword_check = keyword_checker(result, expected_keywords)
+        # Step 2: Loop to generate & check until passed or max retries
+        for attempt in range(1, max_retries + 1):
+            prompt = f"Context: {context}\n\nQuestion: {query}"
+            result = generator(prompt, max_new_tokens=100)[0]['generated_text'].strip()
 
-        # Run explainable evaluation
-        explainable_check = None
-        if reference_answer:
-            explainable_check = llm_checker(result, query, reference_answer)
+            # Step 3: Check if required keywords are in the result
+            if keyword_checker(result, expected_keywords):
+                return {
+                    "answer": result,
+                    "attempts": attempt,
+                    "keyword_check_passed": True
+                }
 
+            # Optional: Adjust prompt for retries to encourage refinement
+            context += f"\n\nNote: Previous answer did not include all required facts. Try again."
+
+        # Step 4: Failed after retries
         return {
             "answer": result,
-            "keyword_check_passed": keyword_check,
-            "llm_verification": explainable_check
+            "attempts": max_retries,
+            "keyword_check_passed": False,
+            "warning": "Keyword check failed after max retries."
         }
 
     except Exception as e:
@@ -80,12 +87,12 @@ def web_rag_with_checkers(query, expected_keywords=None, reference_answer=None):
 
 # --- Example Usage ---
 query = "who is Vekin Chief Operating Officer?"
-expected_keywords = ["Vekin", "Cheif Operating Officer"]
-reference_answer = "The Chief Operating Officer of Vekin is John Doe."  # Replace with verified info
+expected_keywords = ["Vekin", "Chief Operating Officer"]
 
-response = web_rag_with_checkers(query, expected_keywords, reference_answer)
+response = web_rag_with_dynamic_retries(query, expected_keywords)
 
-# Output
 print("Answer:", response["answer"])
 print("Keyword Check Passed:", response["keyword_check_passed"])
-print("LLM Verification:", response["llm_verification"])
+print("Attempts:", response["attempts"])
+if "warning" in response:
+    print("Warning:", response["warning"])
